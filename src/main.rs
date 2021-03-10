@@ -5,6 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const BGP_MAX_MSG_SIZE: usize = 4096;
 const BGP_HEADER_SIZE: usize = 19;
+const BGP_OPEN_SIZE: usize = 10;
 
 const BGP_TYPE_OPEN: u8 = 0x01;
 const BGP_TYPE_UPDATE: u8 = 0x02;
@@ -31,6 +32,13 @@ struct BGPNotification {
 #[derive(Debug)]
 struct BGPKeepalive {}
 
+fn make_bgp_header(length: u16, msg_type: u8) -> [u8; BGP_HEADER_SIZE] {
+    let mut buf = [0xFF; BGP_HEADER_SIZE];
+    NetworkEndian::write_u16(&mut buf[16..18], BGP_HEADER_SIZE as u16 + length);
+    buf[18] = msg_type;
+    return buf
+}
+
 impl From<&[u8]> for BGPOpen {
     fn from(buf: &[u8]) -> BGPOpen {
         BGPOpen {
@@ -41,6 +49,24 @@ impl From<&[u8]> for BGPOpen {
             opt_params_len: buf[9],
             opt_params: (),
         }
+    }
+}
+
+impl Into<[u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE]> for BGPOpen {
+    fn into(self) -> [u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE] {
+        let mut buf = [0 as u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE];
+        const BHS: usize = BGP_HEADER_SIZE;
+
+        let header = make_bgp_header(BGP_OPEN_SIZE as u16, BGP_TYPE_OPEN);
+
+        buf[0 .. BHS].copy_from_slice(&header[..]);
+        buf[BHS + 0] = self.version;
+        NetworkEndian::write_u16(&mut buf[BHS + 1 .. BHS + 3], self.sender_as);
+        NetworkEndian::write_u16(&mut buf[BHS + 3 .. BHS + 5], self.hold_time);
+        NetworkEndian::write_u32(&mut buf[BHS + 5 .. BHS + 9], self.bgp_id);
+        buf[BHS + 9] = self.opt_params_len; 
+
+        return buf
     }
 }
 
@@ -64,13 +90,6 @@ impl From<&[u8]> for BGPKeepalive {
     fn from(buf: &[u8]) -> BGPKeepalive {
         BGPKeepalive {}
     }
-}
-
-fn make_bgp_header(length: u16, msg_type: u8) -> [u8; BGP_HEADER_SIZE] {
-    let mut buf = [0xFF; BGP_HEADER_SIZE];
-    NetworkEndian::write_u16(&mut buf[16..18], BGP_HEADER_SIZE as u16 + length);
-    buf[18] = msg_type;
-    return buf
 }
 
 impl Into<[u8; BGP_HEADER_SIZE]> for BGPKeepalive {
@@ -122,6 +141,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("R: {:?}", &bgp_message);
                 match bgp_message {
                     BGPMessage::Open(_) => {
+                        let open = BGPOpen {
+                            version: 4,
+                            sender_as: 65002,
+                            hold_time: 60,
+                            bgp_id: 1234567890,
+                            opt_params_len: 0,
+                            opt_params: (),
+                        };
+                        println!("S: {:?}", &open);
+                        let buf: [u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE] = open.into();
+                        if let Err(e) = socket.write_all(&buf[..]).await {
+                            eprintln!("failed to write to socket, err = {:?}", e);
+                            return;
+                        }
+                    },
+                    BGPMessage::Keepalive(_) => {
                         let keepalive = BGPKeepalive {};
                         println!("S: {:?}", &keepalive);
                         let buf: [u8; BGP_HEADER_SIZE] = keepalive.into();
