@@ -12,17 +12,35 @@ const BGP_TYPE_NOTIFICATION: u8 = 0x03;
 const BGP_TYPE_KEEPALIVE: u8 = 0x04;
 
 #[derive(Debug)]
-struct BGPOpen {}
+struct BGPOpen {
+    version: u8,
+    sender_as: u16,
+    hold_time: u16,
+    bgp_id: u32,
+    opt_params_len: u8,
+    opt_params: ()
+}
 #[derive(Debug)]
 struct BGPUpdate {}
 #[derive(Debug)]
-struct BGPNotification {}
+struct BGPNotification {
+    error_code: u8,
+    error_subcode: u8,
+    data: Vec<u8>,
+}
 #[derive(Debug)]
 struct BGPKeepalive {}
 
 impl From<&[u8]> for BGPOpen {
     fn from(buf: &[u8]) -> BGPOpen {
-        BGPOpen {}
+        BGPOpen {
+            version: buf[0],
+            sender_as: NetworkEndian::read_u16(&buf[1..3]),
+            hold_time: NetworkEndian::read_u16(&buf[3..5]),
+            bgp_id: NetworkEndian::read_u32(&buf[5..9]),
+            opt_params_len: buf[9],
+            opt_params: (),
+        }
     }
 }
 
@@ -34,7 +52,11 @@ impl From<&[u8]> for BGPUpdate {
 
 impl From<&[u8]> for BGPNotification {
     fn from(buf: &[u8]) -> BGPNotification {
-        BGPNotification {}
+        BGPNotification {
+            error_code: buf[0],
+            error_subcode: buf[1],
+            data: buf[2..].to_vec(),
+        }
     }
 }
 
