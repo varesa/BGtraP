@@ -6,66 +6,65 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const BGP_MAX_MSG_SIZE: usize = 4096;
 const BGP_HEADER_SIZE: usize = 19;
 
-enum BGPMessageType {
-    OPEN,
-    UPDATE,
-    NOTIFICATION,
-    KEEPALIVE,
-    UNKNOWN,
-}
+const BGP_TYPE_OPEN: u8 = 0x01;
+const BGP_TYPE_UPDATE: u8 = 0x02;
+const BGP_TYPE_NOTIFICATION: u8 = 0x03;
+const BGP_TYPE_KEEPALIVE: u8 = 0x04;
 
-impl From<u8> for BGPMessageType {
-    fn from(value: u8) -> BGPMessageType {
-        match value {
-            0x01 => BGPMessageType::OPEN,
-            0x02 => BGPMessageType::UPDATE,
-            0x03 => BGPMessageType::NOTIFICATION,
-            0x04 => BGPMessageType::KEEPALIVE,
-            _ => BGPMessageType::UNKNOWN
-        }
-    }
-}
-
-struct BGPOpen {
-    
-}
+#[derive(Debug)]
+struct BGPOpen {}
+#[derive(Debug)]
+struct BGPUpdate {}
+#[derive(Debug)]
+struct BGPNotification {}
+#[derive(Debug)]
+struct BGPKeepalive {}
 
 impl From<&[u8]> for BGPOpen {
     fn from(buf: &[u8]) -> BGPOpen {
-        BGPOpen {
-
-        }
+        BGPOpen {}
     }
 }
 
-struct BGPUpdate {
-
+impl From<&[u8]> for BGPUpdate {
+    fn from(buf: &[u8]) -> BGPUpdate {
+        BGPUpdate {}
+    }
 }
 
-enum BGPMessageContent {
+impl From<&[u8]> for BGPNotification {
+    fn from(buf: &[u8]) -> BGPNotification {
+        BGPNotification {}
+    }
+}
+
+impl From<&[u8]> for BGPKeepalive {
+    fn from(buf: &[u8]) -> BGPKeepalive {
+        BGPKeepalive {}
+    }
+}
+
+#[derive(Debug)]
+enum BGPMessage {
     Open(BGPOpen),
     Update(BGPUpdate),
+    Notification(BGPNotification),
+    Keepalive(BGPKeepalive),
 }
 
-struct BGPMessage {
-    header: [u8; 19],
-    content: BGPMessageContent,
-}
-
-impl From<[u8; BGP_MAX_MSG_SIZE]> for BGPMessage {
-    fn from(buf: [u8; BGP_MAX_MSG_SIZE]) -> BGPMessage {
+impl From<&[u8]> for BGPMessage {
+    fn from(buf: &[u8]) -> BGPMessage {
         let (header, rest) = buf.split_at(BGP_HEADER_SIZE);
-        let size = NetworkEndian::read_u16(&header[16..18]);
+        let length = NetworkEndian::read_u16(&header[16..18]) as usize;
+        let msg_payload = &rest[0..length - BGP_HEADER_SIZE];
         let msg_type = header[18];
-        let content = match msg_type.into() {
-            BGPMessageType::OPEN => BGPMessageContent::Open(BGPOpen::from(rest)),
+        match msg_type {
+            BGP_TYPE_OPEN => BGPMessage::Open(msg_payload.into()),
+            BGP_TYPE_UPDATE => BGPMessage::Update(msg_payload.into()),
+            BGP_TYPE_NOTIFICATION => BGPMessage::Notification(msg_payload.into()),
+            BGP_TYPE_KEEPALIVE => BGPMessage::Keepalive(msg_payload.into()),
             _ => unimplemented!("BGP Message type: {:?}", msg_type)
-        };
-        let msg = BGPMessage {
-            header: header.try_into().expect("slice with incorrect length"),
-            content: content.into()
-        };
-        msg
+        }
     }
 }
 
@@ -84,10 +83,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(n) => n,
                     Err(e) => { eprintln!("failed to read from socket, err = {:?}", e); return; }
                 };
-                if let Err(e) = socket.write_all(&buf[0..n]).await {
+                let bgp_message: BGPMessage = buf[0..n].into();
+                println!("{:?}", &bgp_message);
+                /*if let Err(e) = socket.write_all(&buf[0..n]).await {
                     eprintln!("failed to write to socket, err = {:?}", e);
                     return;
-                }
+                }*/
             }
         });
     }
