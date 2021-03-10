@@ -66,6 +66,19 @@ impl From<&[u8]> for BGPKeepalive {
     }
 }
 
+fn make_bgp_header(length: u16, msg_type: u8) -> [u8; BGP_HEADER_SIZE] {
+    let mut buf = [0xFF; BGP_HEADER_SIZE];
+    NetworkEndian::write_u16(&mut buf[16..18], BGP_HEADER_SIZE as u16 + length);
+    buf[18] = msg_type;
+    return buf
+}
+
+impl Into<[u8; BGP_HEADER_SIZE]> for BGPKeepalive {
+    fn into(self) -> [u8; BGP_HEADER_SIZE] {
+        make_bgp_header(0, BGP_TYPE_KEEPALIVE)
+    }
+}
+
 #[derive(Debug)]
 enum BGPMessage {
     Open(BGPOpen),
@@ -106,7 +119,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => { eprintln!("failed to read from socket, err = {:?}", e); return; }
                 };
                 let bgp_message: BGPMessage = buf[0..n].into();
-                println!("{:?}", &bgp_message);
+                println!("R: {:?}", &bgp_message);
+                match bgp_message {
+                    BGPMessage::Open(_) => {
+                        let keepalive = BGPKeepalive {};
+                        println!("S: {:?}", &keepalive);
+                        let buf: [u8; BGP_HEADER_SIZE] = keepalive.into();
+                        if let Err(e) = socket.write_all(&buf[..]).await {
+                            eprintln!("failed to write to socket, err = {:?}", e);
+                            return;
+                        }
+                    },
+                    _ => {}
+                }
                 /*if let Err(e) = socket.write_all(&buf[0..n]).await {
                     eprintln!("failed to write to socket, err = {:?}", e);
                     return;
