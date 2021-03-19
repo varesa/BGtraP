@@ -1,5 +1,4 @@
 use byteorder::{ByteOrder, NetworkEndian};
-use std::convert::TryInto;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -13,6 +12,12 @@ const BGP_TYPE_NOTIFICATION: u8 = 0x03;
 const BGP_TYPE_KEEPALIVE: u8 = 0x04;
 
 #[derive(Debug)]
+struct Prefix {
+    length: u8,
+    prefix: [u8; 4],
+}
+
+#[derive(Debug)]
 struct BGPOpen {
     version: u8,
     sender_as: u16,
@@ -22,7 +27,13 @@ struct BGPOpen {
     opt_params: ()
 }
 #[derive(Debug)]
-struct BGPUpdate {}
+struct BGPUpdate {
+    withdrawn_routes_len: u16,
+    withdrawn_routes: Vec<Prefix>,
+    total_path_attribute_len: u16,
+    path_attributes: Vec<PathAttribute>,
+    network_layer_reachability_information: (),
+}
 #[derive(Debug)]
 struct BGPNotification {
     error_code: u8,
@@ -70,9 +81,72 @@ impl Into<[u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE]> for BGPOpen {
     }
 }
 
+#[derive(Debug)]
+struct PathAttribute {
+    flags: u8,
+    type_code: u8,
+    value: Vec<u8>,
+}
+
 impl From<&[u8]> for BGPUpdate {
     fn from(buf: &[u8]) -> BGPUpdate {
-        BGPUpdate {}
+        let withdrawn_length = NetworkEndian::read_u16(&buf[0..2]);
+        let mut withdrawn_routes: Vec<Prefix> = Vec::new();
+
+        let mut withdrawn_left = withdrawn_length;
+        let mut i = 2; // Start after the "withdrawn length" field
+
+        while withdrawn_left > 0 {
+            let prefix_length = buf[i];
+            let prefix_octets = (prefix_length as f32 / 8f32).ceil() as usize;
+            let mut prefix = [0 as u8; 4];
+            prefix[0..prefix_octets].copy_from_slice(&buf[i+1 .. i+1+prefix_octets]);
+            withdrawn_routes.push(Prefix {
+                prefix: prefix,
+                length: prefix_length,
+            });
+            i += 1 + prefix_octets;
+            withdrawn_left -= 1 + prefix_octets as u16;
+        }
+
+        let mut path_attributes = Vec::new();
+        let path_attribute_length = NetworkEndian::read_u16(&buf[2 + withdrawn_length as usize .. 4 + withdrawn_length as usize]);
+        let mut attributes_left = path_attribute_length as usize;
+        let mut i = (2 + withdrawn_length + 2) as usize;
+        while attributes_left > 0 {
+            let flags = buf[i];
+            let type_code = buf[i+1];
+
+            let attribute_length;
+            let attribute_header_length;
+            if (flags & 0b00010000) != 0 { // Extended length
+                attribute_length = NetworkEndian::read_u16(&buf[i+2..i+4]) as usize;
+                attribute_header_length = 4;
+            } else { // Normal length
+                attribute_length = buf[i+2] as usize;
+                attribute_header_length = 3;
+            }
+            let attribute_value = buf[i + attribute_header_length .. i + attribute_header_length + attribute_length].to_vec();
+            path_attributes.push(
+                PathAttribute {
+                    flags,
+                    type_code,
+                    value: attribute_value,
+                }
+            );
+            i += attribute_header_length + attribute_length;
+            attributes_left -= attribute_header_length + attribute_length;
+        }
+
+        let prefixes_length = buf.len() - 2 - withdrawn_length as usize - 2 - path_attribute_length as usize;
+
+        BGPUpdate {
+            withdrawn_routes_len: withdrawn_length,
+            withdrawn_routes: withdrawn_routes,
+            total_path_attribute_len: path_attribute_length,
+            path_attributes: path_attributes,
+            network_layer_reachability_information: (),
+        }
     }
 }
 
@@ -87,7 +161,7 @@ impl From<&[u8]> for BGPNotification {
 }
 
 impl From<&[u8]> for BGPKeepalive {
-    fn from(buf: &[u8]) -> BGPKeepalive {
+    fn from(_buf: &[u8]) -> BGPKeepalive {
         BGPKeepalive {}
     }
 }
@@ -138,7 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => { eprintln!("failed to read from socket, err = {:?}", e); return; }
                 };
                 let bgp_message: BGPMessage = buf[0..n].into();
-                println!("R: {:?}", &bgp_message);
+                println!("R: {:#?}", &bgp_message);
                 match bgp_message {
                     BGPMessage::Open(_) => {
                         let open = BGPOpen {
