@@ -1,233 +1,11 @@
-use byteorder::{ByteOrder, NetworkEndian};
+mod bgp;
+
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::fmt;
 
-const BGP_MAX_MSG_SIZE: usize = 4096;
-const BGP_HEADER_SIZE: usize = 19;
-const BGP_OPEN_SIZE: usize = 10;
-
-const BGP_TYPE_OPEN: u8 = 0x01;
-const BGP_TYPE_UPDATE: u8 = 0x02;
-const BGP_TYPE_NOTIFICATION: u8 = 0x03;
-const BGP_TYPE_KEEPALIVE: u8 = 0x04;
-
-//#[derive(Debug)]
-struct Prefix {
-    length: u8,
-    prefix: [u8; 4],
-}
-
-impl fmt::Debug for Prefix {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_fmt(format_args!("{}.{}.{}.{}/{}", self.prefix[0], self.prefix[1], self.prefix[2], self.prefix[3], self.length))
-    }
-}
-
-#[derive(Debug)]
-struct BGPOpen {
-    version: u8,
-    sender_as: u16,
-    hold_time: u16,
-    bgp_id: u32,
-    opt_params_len: u8,
-    opt_params: ()
-}
-#[derive(Debug)]
-struct BGPUpdate {
-    withdrawn_routes_len: u16,
-    withdrawn_routes: Vec<Prefix>,
-    total_path_attribute_len: u16,
-    path_attributes: Vec<PathAttribute>,
-    network_layer_reachability_information: Vec<Prefix>,
-}
-#[derive(Debug)]
-struct BGPNotification {
-    error_code: u8,
-    error_subcode: u8,
-    data: Vec<u8>,
-}
-#[derive(Debug)]
-struct BGPKeepalive {}
-
-fn make_bgp_header(length: u16, msg_type: u8) -> [u8; BGP_HEADER_SIZE] {
-    let mut buf = [0xFF; BGP_HEADER_SIZE];
-    NetworkEndian::write_u16(&mut buf[16..18], BGP_HEADER_SIZE as u16 + length);
-    buf[18] = msg_type;
-    return buf
-}
-
-impl From<&[u8]> for BGPOpen {
-    fn from(buf: &[u8]) -> BGPOpen {
-        BGPOpen {
-            version: buf[0],
-            sender_as: NetworkEndian::read_u16(&buf[1..3]),
-            hold_time: NetworkEndian::read_u16(&buf[3..5]),
-            bgp_id: NetworkEndian::read_u32(&buf[5..9]),
-            opt_params_len: buf[9],
-            opt_params: (),
-        }
-    }
-}
-
-impl Into<[u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE]> for BGPOpen {
-    fn into(self) -> [u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE] {
-        let mut buf = [0 as u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE];
-        const BHS: usize = BGP_HEADER_SIZE;
-
-        let header = make_bgp_header(BGP_OPEN_SIZE as u16, BGP_TYPE_OPEN);
-
-        buf[0 .. BHS].copy_from_slice(&header[..]);
-        buf[BHS + 0] = self.version;
-        NetworkEndian::write_u16(&mut buf[BHS + 1 .. BHS + 3], self.sender_as);
-        NetworkEndian::write_u16(&mut buf[BHS + 3 .. BHS + 5], self.hold_time);
-        NetworkEndian::write_u32(&mut buf[BHS + 5 .. BHS + 9], self.bgp_id);
-        buf[BHS + 9] = self.opt_params_len; 
-
-        return buf
-    }
-}
-
-#[derive(Debug)]
-struct PathAttribute {
-    flags: u8,
-    type_code: u8,
-    value: Vec<u8>,
-}
-
-fn extract_prefixes(data: &[u8]) -> Vec<Prefix> {
-    let mut routes: Vec<Prefix> = Vec::new();
-
-    let mut bytes_left = data.len();
-    let mut i = 0; // Start after the "withdrawn length" field
-
-    while bytes_left > 0 {
-        let prefix_length = data[i];
-        let prefix_octets = (prefix_length as f32 / 8f32).ceil() as usize;
-        let mut prefix = [0 as u8; 4];
-        prefix[0..prefix_octets].copy_from_slice(&data[i+1 .. i+1+prefix_octets]);
-        routes.push(Prefix {
-            prefix: prefix,
-            length: prefix_length,
-        });
-        i += 1 + prefix_octets;
-        bytes_left -= 1 + prefix_octets as usize;
-    }
-
-    return routes;
-}
-
-fn extract_path_attributes(data: &[u8]) -> Vec<PathAttribute> {
-    let mut path_attributes = Vec::new();
-
-    let mut bytes_left = data.len();
-    let mut i = 0;
-    while bytes_left > 0 {
-        let flags = data[i];
-        let type_code = data[i+1];
-
-        let attribute_length;
-        let attribute_header_length;
-        if (flags & 0b00010000) != 0 { // Extended length
-            attribute_length = NetworkEndian::read_u16(&data[i+2..i+4]) as usize;
-            attribute_header_length = 4;
-        } else { // Normal length
-            attribute_length = data[i+2] as usize;
-            attribute_header_length = 3;
-        }
-        let attribute_value = data[i + attribute_header_length .. i + attribute_header_length + attribute_length].to_vec();
-        path_attributes.push(
-            PathAttribute {
-                flags,
-                type_code,
-                value: attribute_value,
-            }
-        );
-        i += attribute_header_length + attribute_length;
-        bytes_left -= attribute_header_length + attribute_length;
-    }
-    return path_attributes;
-}
-
-const U16_LENGTH_FIELD: usize = 2;
-
-impl From<&[u8]> for BGPUpdate {
-    fn from(buf: &[u8]) -> BGPUpdate {
-        let withdrawn_routes_start = 0;
-        let withdrawn_length = NetworkEndian::read_u16(&buf[withdrawn_routes_start .. withdrawn_routes_start + U16_LENGTH_FIELD]);
-        let withdrawn_routes = extract_prefixes(&buf[withdrawn_routes_start + U16_LENGTH_FIELD .. withdrawn_routes_start + U16_LENGTH_FIELD + withdrawn_length as usize]);
-
-        let path_attributes_start = withdrawn_routes_start + U16_LENGTH_FIELD + withdrawn_length as usize;
-        let path_attribute_length = NetworkEndian::read_u16(&buf[path_attributes_start .. path_attributes_start + U16_LENGTH_FIELD]);
-        let path_attributes = extract_path_attributes(
-            &buf[path_attributes_start + U16_LENGTH_FIELD .. path_attributes_start + U16_LENGTH_FIELD + path_attribute_length as usize]
-        );
-
-        let prefixes_start = path_attributes_start + U16_LENGTH_FIELD + path_attribute_length as usize;
-        let prefixes_length = buf.len() - prefixes_start;
-        let prefixes = extract_prefixes(&buf[prefixes_start .. prefixes_start + prefixes_length]);
-
-        println!("{:?}", &prefixes);
-
-        BGPUpdate {
-            withdrawn_routes_len: withdrawn_length,
-            withdrawn_routes: withdrawn_routes,
-            total_path_attribute_len: path_attribute_length,
-            path_attributes: path_attributes,
-            network_layer_reachability_information: prefixes,
-        }
-    }
-}
-
-impl From<&[u8]> for BGPNotification {
-    fn from(buf: &[u8]) -> BGPNotification {
-        BGPNotification {
-            error_code: buf[0],
-            error_subcode: buf[1],
-            data: buf[2..].to_vec(),
-        }
-    }
-}
-
-impl From<&[u8]> for BGPKeepalive {
-    fn from(_buf: &[u8]) -> BGPKeepalive {
-        BGPKeepalive {}
-    }
-}
-
-impl Into<[u8; BGP_HEADER_SIZE]> for BGPKeepalive {
-    fn into(self) -> [u8; BGP_HEADER_SIZE] {
-        make_bgp_header(0, BGP_TYPE_KEEPALIVE)
-    }
-}
-
-#[derive(Debug)]
-enum BGPMessage {
-    Open(BGPOpen),
-    Update(BGPUpdate),
-    Notification(BGPNotification),
-    Keepalive(BGPKeepalive),
-}
-
-fn message_length(message_buffer: &[u8]) -> usize {
-    NetworkEndian::read_u16(&message_buffer[16..18]) as usize
-}
-
-impl From<&[u8]> for BGPMessage {
-    fn from(buf: &[u8]) -> BGPMessage {
-        let (header, rest) = buf.split_at(BGP_HEADER_SIZE);
-        let length = message_length(&header);
-        let msg_payload = &rest[0..length - BGP_HEADER_SIZE];
-        let msg_type = header[18];
-        match msg_type {
-            BGP_TYPE_OPEN => BGPMessage::Open(msg_payload.into()),
-            BGP_TYPE_UPDATE => BGPMessage::Update(msg_payload.into()),
-            BGP_TYPE_NOTIFICATION => BGPMessage::Notification(msg_payload.into()),
-            BGP_TYPE_KEEPALIVE => BGPMessage::Keepalive(msg_payload.into()),
-            _ => unimplemented!("BGP Message type: {:?}", msg_type)
-        }
-    }
-}
+use bgp::{BGP_HEADER_SIZE, BGP_OPEN_SIZE, BGP_MAX_MSG_SIZE, BGPMessage, message_length};
+use bgp::open::BGPOpen;
+use bgp::keepalive::BGPKeepalive;
 
 async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> () {
     match message {
@@ -275,7 +53,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(n) => n,
                     Err(e) => { eprintln!("failed to read from socket, err = {:?}", e); return; }
                 };
-                //println!("{}", n);
                 let mut bytes_left = n;
                 let mut i = 0;
                 while bytes_left > 0 {
@@ -288,11 +65,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 //println!("R: {:#?}", &bgp_message);
-
-                /*if let Err(e) = socket.write_all(&buf[0..n]).await {
-                    eprintln!("failed to write to socket, err = {:?}", e);
-                    return;
-                }*/
             }
         });
     }
