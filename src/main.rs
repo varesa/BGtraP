@@ -1,7 +1,6 @@
 use byteorder::{ByteOrder, NetworkEndian};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::io::Write;
 use std::fmt;
 
 const BGP_MAX_MSG_SIZE: usize = 4096;
@@ -168,13 +167,13 @@ impl From<&[u8]> for BGPUpdate {
         let prefixes_length = buf.len() - prefixes_start;
         let prefixes = extract_prefixes(&buf[prefixes_start .. prefixes_start + prefixes_length]);
 
-        println!("{:?}", &buf);
+        println!("{:?}", &prefixes);
 
         BGPUpdate {
             withdrawn_routes_len: withdrawn_length,
-            withdrawn_routes: Vec::new(), //withdrawn_routes,
+            withdrawn_routes: withdrawn_routes,
             total_path_attribute_len: path_attribute_length,
-            path_attributes: Vec::new(), //path_attributes,
+            path_attributes: path_attributes,
             network_layer_reachability_information: prefixes,
         }
     }
@@ -210,10 +209,14 @@ enum BGPMessage {
     Keepalive(BGPKeepalive),
 }
 
+fn message_length(message_buffer: &[u8]) -> usize {
+    NetworkEndian::read_u16(&message_buffer[16..18]) as usize
+}
+
 impl From<&[u8]> for BGPMessage {
     fn from(buf: &[u8]) -> BGPMessage {
         let (header, rest) = buf.split_at(BGP_HEADER_SIZE);
-        let length = NetworkEndian::read_u16(&header[16..18]) as usize;
+        let length = message_length(&header);
         let msg_payload = &rest[0..length - BGP_HEADER_SIZE];
         let msg_type = header[18];
         match msg_type {
@@ -223,6 +226,37 @@ impl From<&[u8]> for BGPMessage {
             BGP_TYPE_KEEPALIVE => BGPMessage::Keepalive(msg_payload.into()),
             _ => unimplemented!("BGP Message type: {:?}", msg_type)
         }
+    }
+}
+
+async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> () {
+    match message {
+        BGPMessage::Open(_) => {
+            let open = BGPOpen {
+                version: 4,
+                sender_as: 65002,
+                hold_time: 30,
+                bgp_id: 1234567890,
+                opt_params_len: 0,
+                opt_params: (),
+            };
+            //println!("S: {:?}", &open);
+            let buf: [u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE] = open.into();
+            if let Err(e) = socket.write_all(&buf[..]).await {
+                eprintln!("failed to write to socket, err = {:?}", e);
+                return;
+            }
+        },
+        BGPMessage::Keepalive(_) => {
+            let keepalive = BGPKeepalive {};
+            //println!("S: {:?}", &keepalive);
+            let buf: [u8; BGP_HEADER_SIZE] = keepalive.into();
+            if let Err(e) = socket.write_all(&buf[..]).await {
+                eprintln!("failed to write to socket, err = {:?}", e);
+                return;
+            }
+        },
+        _ => {}
     }
 }
 
@@ -241,36 +275,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(n) => n,
                     Err(e) => { eprintln!("failed to read from socket, err = {:?}", e); return; }
                 };
-                let bgp_message: BGPMessage = buf[0..n].into();
-                println!("R: {:#?}", &bgp_message);
-                match bgp_message {
-                    BGPMessage::Open(_) => {
-                        let open = BGPOpen {
-                            version: 4,
-                            sender_as: 65002,
-                            hold_time: 60,
-                            bgp_id: 1234567890,
-                            opt_params_len: 0,
-                            opt_params: (),
-                        };
-                        println!("S: {:?}", &open);
-                        let buf: [u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE] = open.into();
-                        if let Err(e) = socket.write_all(&buf[..]).await {
-                            eprintln!("failed to write to socket, err = {:?}", e);
-                            return;
-                        }
-                    },
-                    BGPMessage::Keepalive(_) => {
-                        let keepalive = BGPKeepalive {};
-                        println!("S: {:?}", &keepalive);
-                        let buf: [u8; BGP_HEADER_SIZE] = keepalive.into();
-                        if let Err(e) = socket.write_all(&buf[..]).await {
-                            eprintln!("failed to write to socket, err = {:?}", e);
-                            return;
-                        }
-                    },
-                    _ => {}
+                //println!("{}", n);
+                let mut bytes_left = n;
+                let mut i = 0;
+                while bytes_left > 0 {
+                    let bgp_message_buf = &buf[i..n];
+                    let bgp_message_length = message_length(&bgp_message_buf);
+                    let bgp_message: BGPMessage = bgp_message_buf.into();
+                    handle_message(&bgp_message, &mut socket).await;
+                    i += bgp_message_length;
+                    bytes_left -= bgp_message_length;
                 }
+
+                //println!("R: {:#?}", &bgp_message);
+
                 /*if let Err(e) = socket.write_all(&buf[0..n]).await {
                     eprintln!("failed to write to socket, err = {:?}", e);
                     return;
