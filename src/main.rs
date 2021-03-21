@@ -10,15 +10,32 @@ use bgp::errors::BgpError;
 
 const LOG_MESSAGES: bool = true;
 
+macro_rules! log_message_content {
+    ($prefix:expr, $message:expr, [$($type:ident),+]) => {
+        match $message {
+            $(
+                BGPMessage::$type(content) => println!("{}: {:#?}", $prefix, &content),
+            )+
+        }
+    }
+}
+
+fn log_message(prefix: &str, message: &BGPMessage) {
+    if !LOG_MESSAGES {
+        return
+    }
+    log_message_content!(prefix, message, [Open, Keepalive, Update, Notification]);
+}
+
 async fn send_message(message: BGPMessage, socket: &mut TcpStream) -> Result<(), BgpError>{
-    if LOG_MESSAGES { println!("S: {:#?}", &message); }
+    log_message("S", &message);
     let buf: Vec<u8> = message.into();
     socket.write_all(&buf[..]).await?;
     Ok(())
 }
 
 async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> Result<(), BgpError> {
-    if LOG_MESSAGES { println!("R: {:#?}", &message); }
+    log_message("R", &message);
     match message {
         BGPMessage::Open(_) => {
             let open = BGPOpen {
