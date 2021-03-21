@@ -59,6 +59,14 @@ fn extract_attribute_flags(flags_bitfield: u8) -> Vec<AttributeFlag> {
     return flags
 }
 
+fn compile_attribute_flags(flags: Vec<AttributeFlag>) -> u8 {
+    let mut bitfield = 0u8;
+    for flag in flags {
+        bitfield |= flag as u8;
+    }
+    return bitfield
+}
+
 pub(crate) fn extract_path_attributes(data: &[u8]) -> Vec<PathAttribute> {
     let mut path_attributes = Vec::new();
 
@@ -108,5 +116,20 @@ mod tests {
             AttributeFlag::Transitive,
             AttributeFlag::Optional,
         ]);
+    }
+
+    #[test]
+    fn test_compile_attribute_flags() {
+        assert_eq!(0, compile_attribute_flags(vec![]));
+        assert_eq!(0b1000 << 4, compile_attribute_flags(vec![AttributeFlag::Optional]));
+        assert_eq!(0b0100 << 4, compile_attribute_flags(vec![AttributeFlag::Transitive]));
+        assert_eq!(0b0010 << 4, compile_attribute_flags(vec![AttributeFlag::Partial]));
+        assert_eq!(0b0001 << 4, compile_attribute_flags(vec![AttributeFlag::ExtendedLength]));
+        assert_eq!(0b1111 << 4, compile_attribute_flags(vec![
+            AttributeFlag::ExtendedLength,
+            AttributeFlag::Partial,
+            AttributeFlag::Transitive,
+            AttributeFlag::Optional,
+        ]));
     }
 }
