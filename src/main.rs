@@ -1,5 +1,8 @@
 mod bgp;
 
+#[macro_use]
+extern crate num_derive;
+
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

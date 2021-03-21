@@ -1,4 +1,6 @@
-use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
+use byteorder::{ByteOrder, NetworkEndian};
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
 use std::fmt;
 
 pub struct Prefix {
@@ -23,8 +25,8 @@ pub struct BGPUpdate {
 
 #[derive(Debug)]
 pub struct PathAttribute {
-    flags: u8,
-    type_code: u8,
+    flags: Vec<AttributeFlag>,
+    type_code: AttributeType,
     value: Vec<u8>,
 }
 
@@ -50,18 +52,58 @@ fn extract_prefixes(data: &[u8]) -> Vec<Prefix> {
     return routes;
 }
 
+#[derive(FromPrimitive, ToPrimitive, Debug)]
+enum AttributeFlag {
+    Optional       = 1 << 7,
+    Transitional   = 1 << 6,
+    Partial        = 1 << 5,
+    ExtendedLength = 1 << 4,
+}
+
+#[derive(Debug)]
+enum AttributeType {
+    Origin, ASPath, NextHop, MultiExitDisc, LocalPref, AtomicAggregate, Aggregator, Unknown(u8)
+}
+
+impl From<u8> for AttributeType {
+    fn from(code: u8) -> Self {
+        match code {
+            1 => AttributeType::Origin,
+            2 => AttributeType::ASPath,
+            3 => AttributeType::NextHop,
+            4 => AttributeType::MultiExitDisc,
+            5 => AttributeType::LocalPref,
+            6 => AttributeType::AtomicAggregate,
+            7 => AttributeType::Aggregator,
+            n => AttributeType::Unknown(n)
+        }
+    }
+}
+
 fn extract_path_attributes(data: &[u8]) -> Vec<PathAttribute> {
     let mut path_attributes = Vec::new();
 
     let mut bytes_left = data.len();
     let mut i = 0;
     while bytes_left > 0 {
-        let flags = data[i];
+        let flags_bitfield = data[i];
+        let mut flags = Vec::new();
+        for offset in 4 .. 8 {
+            let flag_bit = 1 << offset;
+            if flags_bitfield & flag_bit != 0 {
+                let flag: Option<AttributeFlag> = FromPrimitive::from_u8(flag_bit);
+                if let Some(flag) = flag {
+                    flags.push(flag);
+                } else {
+                    panic!(format!("Bad attribute flags: {}", flags_bitfield));
+                }
+            }
+        }
         let type_code = data[i+1];
 
         let attribute_length;
         let attribute_header_length;
-        if (flags & 0b00010000) != 0 { // Extended length
+        if (flags_bitfield & AttributeFlag::ExtendedLength as u8) != 0 { // Extended length
             attribute_length = NetworkEndian::read_u16(&data[i+2..i+4]) as usize;
             attribute_header_length = 4;
         } else { // Normal length
@@ -72,7 +114,7 @@ fn extract_path_attributes(data: &[u8]) -> Vec<PathAttribute> {
         path_attributes.push(
             PathAttribute {
                 flags,
-                type_code,
+                type_code: type_code.into(),
                 value: attribute_value,
             }
         );
