@@ -3,6 +3,40 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::fmt::Formatter;
 
+macro_rules! extended_enum {
+    ($name:ident, [$($value:literal: $label:ident),+ $(,)?]) => {
+        #[derive(Debug, PartialEq)]
+        pub enum $name {
+            $(
+                $label,
+            )+
+            Unknown(u8)
+        }
+
+        impl From<u8> for $name {
+            fn from(i: u8) -> Self {
+                match i {
+                    $(
+                        $value => $name::$label,
+                    )+
+                    n => $name::Unknown(n)
+                }
+            }
+        }
+
+        impl Into<u8> for $name {
+            fn into(self) -> u8 {
+                match self {
+                    $(
+                        $name::$label => $value,
+                    )+
+                    $name::Unknown(n) => n,
+                }
+            }
+        }
+    }
+}
+
 #[derive(FromPrimitive, ToPrimitive, Debug, PartialEq, Clone, Copy)]
 pub enum AttributeFlag {
     Optional       = 1 << 7,
@@ -11,10 +45,15 @@ pub enum AttributeFlag {
     ExtendedLength = 1 << 4,
 }
 
-#[derive(Debug, PartialEq)]
-pub enum AttributeType {
-    Origin, ASPath, NextHop, MultiExitDisc, LocalPref, AtomicAggregate, Aggregator, Unknown(u8)
-}
+extended_enum!(AttributeType, [
+    1: Origin,
+    2: ASPath,
+    3: NextHop,
+    4: MultiExitDisc,
+    5: LocalPref,
+    6: AtomicAggregate,
+    7: Aggregator,
+]);
 
 #[derive(PartialEq)]
 pub struct PathAttribute {
@@ -26,36 +65,6 @@ pub struct PathAttribute {
 impl std::fmt::Debug for PathAttribute {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("[PathAttribute] {:?}: {:?} (Flags: {:?})", self.type_code, self.value, self.flags))
-    }
-}
-
-impl From<u8> for AttributeType {
-    fn from(code: u8) -> Self {
-        match code {
-            1 => AttributeType::Origin,
-            2 => AttributeType::ASPath,
-            3 => AttributeType::NextHop,
-            4 => AttributeType::MultiExitDisc,
-            5 => AttributeType::LocalPref,
-            6 => AttributeType::AtomicAggregate,
-            7 => AttributeType::Aggregator,
-            n => AttributeType::Unknown(n)
-        }
-    }
-}
-
-impl Into<u8> for AttributeType {
-    fn into(self) -> u8 {
-        match self {
-            AttributeType::Origin => 1,
-            AttributeType::ASPath => 2,
-            AttributeType::NextHop => 3,
-            AttributeType::MultiExitDisc => 4,
-            AttributeType::LocalPref => 5,
-            AttributeType::AtomicAggregate => 6,
-            AttributeType::Aggregator => 7,
-            AttributeType::Unknown(n) => n,
-        }
     }
 }
 
