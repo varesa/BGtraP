@@ -2,6 +2,7 @@ use byteorder::{ByteOrder, NetworkEndian};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::fmt;
+use std::fmt::Formatter;
 
 pub struct Prefix {
     length: u8,
@@ -23,7 +24,6 @@ pub struct BGPUpdate {
     network_layer_reachability_information: Vec<Prefix>,
 }
 
-#[derive(Debug)]
 pub struct PathAttribute {
     flags: Vec<AttributeFlag>,
     type_code: AttributeType,
@@ -142,8 +142,6 @@ impl From<&[u8]> for BGPUpdate {
         let prefixes_length = buf.len() - prefixes_start;
         let prefixes = extract_prefixes(&buf[prefixes_start .. prefixes_start + prefixes_length]);
 
-        //println!("{:?}", &prefixes);
-
         BGPUpdate {
             withdrawn_routes_len: withdrawn_length,
             withdrawn_routes: withdrawn_routes,
@@ -151,5 +149,11 @@ impl From<&[u8]> for BGPUpdate {
             path_attributes: path_attributes,
             network_layer_reachability_information: prefixes,
         }
+    }
+}
+
+impl std::fmt::Debug for PathAttribute {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[PathAttribute] {:?}: {:?} (Flags: {:?})", self.type_code, self.value, self.flags))
     }
 }
