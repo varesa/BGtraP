@@ -52,35 +52,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_prefixes1() {
-        let data = [32 as u8, 1, 2, 3, 4];
-        let prefixes = extract_prefixes(&data[..]);
-        assert_eq!(prefixes.len(), 1);
-        assert_eq!(prefixes[0], Prefix { length: 32, prefix: [1, 2, 3, 4]});
+    fn test_extract_prefixes() {
+        assert_eq!(
+            extract_prefixes(&[32 as u8, 1, 2, 3, 4]),
+            vec![Prefix { length: 32, prefix: [1, 2, 3, 4]}]
+        );
+        assert_eq!(
+            extract_prefixes(&[32 as u8, 1, 2, 3, 4, 12, 172, 16]),
+            vec![Prefix { length: 32, prefix: [1, 2, 3, 4]}, Prefix { length: 12, prefix: [172, 16, 0, 0]}]
+        );
     }
 
     #[test]
-    fn test_extract_prefixes2() {
-        let data = [32 as u8, 1, 2, 3, 4, 12, 172, 16];
-        let prefixes = extract_prefixes(&data[..]);
-        assert_eq!(prefixes.len(), 2);
-        assert_eq!(prefixes[1], Prefix { length: 12, prefix: [172, 16, 0, 0]});
-    }
+    fn test_compile_prefixes() {
+        assert_eq!(
+            compile_prefixes(vec![Prefix { length: 32, prefix: [1, 2, 3, 4]}]),
+            vec![32 as u8, 1, 2, 3, 4]
+        );
 
-    #[test]
-    fn compile_prefixes1() {
-        let prefixes = vec![Prefix { length: 32, prefix: [1, 2, 3, 4]}];
-        let data = compile_prefixes(prefixes);
-        assert_eq!(data, vec![32 as u8, 1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn compile_prefixes2() {
-        let prefixes = vec![
-            Prefix { length: 32, prefix: [1, 2, 3, 4]},
-            Prefix { length: 12, prefix: [172, 16, 0, 0]},
-        ];
-        let data = compile_prefixes(prefixes);
-        assert_eq!(data, vec![32 as u8, 1, 2, 3, 4, 12, 172, 16]);
+        assert_eq!(
+            compile_prefixes(vec![
+                Prefix { length: 32, prefix: [1, 2, 3, 4]},
+                Prefix { length: 12, prefix: [172, 16, 0, 0]},
+            ]),
+            vec![32 as u8, 1, 2, 3, 4, 12, 172, 16]
+        );
     }
 }
