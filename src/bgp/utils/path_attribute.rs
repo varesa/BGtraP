@@ -3,7 +3,7 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::fmt::Formatter;
 
-#[derive(FromPrimitive, ToPrimitive, Debug, PartialEq)]
+#[derive(FromPrimitive, ToPrimitive, Debug, PartialEq, Clone, Copy)]
 pub enum AttributeFlag {
     Optional       = 1 << 7,
     Transitive     = 1 << 6,
@@ -44,6 +44,21 @@ impl From<u8> for AttributeType {
     }
 }
 
+impl Into<u8> for AttributeType {
+    fn into(self) -> u8 {
+        match self {
+            AttributeType::Origin => 1,
+            AttributeType::ASPath => 2,
+            AttributeType::NextHop => 3,
+            AttributeType::MultiExitDisc => 4,
+            AttributeType::LocalPref => 5,
+            AttributeType::AtomicAggregate => 6,
+            AttributeType::Aggregator => 7,
+            AttributeType::Unknown(n) => n,
+        }
+    }
+}
+
 fn extract_attribute_flags(flags_bitfield: u8) -> Vec<AttributeFlag> {
     let mut flags = Vec::new();
     for offset in 4 .. 8 {
@@ -60,10 +75,10 @@ fn extract_attribute_flags(flags_bitfield: u8) -> Vec<AttributeFlag> {
     return flags
 }
 
-fn compile_attribute_flags(flags: Vec<AttributeFlag>) -> u8 {
+fn compile_attribute_flags(flags: &Vec<AttributeFlag>) -> u8 {
     let mut bitfield = 0u8;
     for flag in flags {
-        bitfield |= flag as u8;
+        bitfield |= *flag as u8;
     }
     return bitfield
 }
@@ -100,6 +115,21 @@ pub(crate) fn extract_path_attributes(data: &[u8]) -> Vec<PathAttribute> {
     return path_attributes;
 }
 
+pub(crate) fn compile_path_attributes(attributes: Vec<PathAttribute>) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    for attribute in attributes {
+        buffer.push(compile_attribute_flags(&attribute.flags));
+        buffer.push(attribute.type_code.into());
+        if attribute.flags.contains(&AttributeFlag::ExtendedLength) {
+            buffer.write_u16::<NetworkEndian>(attribute.value.len() as u16);
+        } else {
+            buffer.push(attribute.value.len() as u8);
+        }
+        buffer.extend(&attribute.value);
+    }
+    return buffer;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,12 +151,12 @@ mod tests {
 
     #[test]
     fn test_compile_attribute_flags() {
-        assert_eq!(0, compile_attribute_flags(vec![]));
-        assert_eq!(0b1000 << 4, compile_attribute_flags(vec![AttributeFlag::Optional]));
-        assert_eq!(0b0100 << 4, compile_attribute_flags(vec![AttributeFlag::Transitive]));
-        assert_eq!(0b0010 << 4, compile_attribute_flags(vec![AttributeFlag::Partial]));
-        assert_eq!(0b0001 << 4, compile_attribute_flags(vec![AttributeFlag::ExtendedLength]));
-        assert_eq!(0b1111 << 4, compile_attribute_flags(vec![
+        assert_eq!(0, compile_attribute_flags(&vec![]));
+        assert_eq!(0b1000 << 4, compile_attribute_flags(&vec![AttributeFlag::Optional]));
+        assert_eq!(0b0100 << 4, compile_attribute_flags(&vec![AttributeFlag::Transitive]));
+        assert_eq!(0b0010 << 4, compile_attribute_flags(&vec![AttributeFlag::Partial]));
+        assert_eq!(0b0001 << 4, compile_attribute_flags(&vec![AttributeFlag::ExtendedLength]));
+        assert_eq!(0b1111 << 4, compile_attribute_flags(&vec![
             AttributeFlag::ExtendedLength,
             AttributeFlag::Partial,
             AttributeFlag::Transitive,
@@ -136,6 +166,8 @@ mod tests {
 
     #[test]
     fn test_extract_path_attributes() {
+        assert_eq!(extract_path_attributes(&[]), vec![]);
+
         assert_eq!(
             extract_path_attributes(&[/* flags */ 0, /* type code */ 0, /* length */ 0]),
             vec![PathAttribute { type_code: AttributeType::Unknown(0), value: vec![], flags: vec![] }]
@@ -156,5 +188,31 @@ mod tests {
                 PathAttribute { type_code: AttributeType::MultiExitDisc, value: vec![0, 0, 0, 0], flags: vec![AttributeFlag::Optional]},
             ]
         );
+    }
+
+    #[test]
+    fn test_compile_path_attributes() {
+        assert_eq!(compile_path_attributes(vec![]), vec![]);
+
+        assert_eq!(
+            compile_path_attributes(vec![PathAttribute { type_code: AttributeType::Unknown(0), value: vec![], flags: vec![] }]),
+            vec![/* flags */ 0, /* type code */ 0, /* length */ 0]
+        );
+
+        assert_eq!(
+            compile_path_attributes(vec![PathAttribute { type_code: AttributeType::Origin, value: vec![2], flags: vec![AttributeFlag::Transitive] }]),
+            vec![/* flags */ 0b0100 << 4, /* type code */ 1, /* length */ 1, /* value */ 2]
+        );
+
+        assert_eq!(
+            compile_path_attributes(vec![
+                PathAttribute { type_code: AttributeType::ASPath, value: vec![], flags: vec![AttributeFlag::ExtendedLength, AttributeFlag::Transitive] },
+                PathAttribute { type_code: AttributeType::MultiExitDisc, value: vec![0, 0, 0, 0], flags: vec![AttributeFlag::Optional]},
+            ]),
+            vec![
+                /* flags */ 0b0101 << 4, /* type code */ 2, /* length */ 0, 0,
+                /* flags */ 0b1000 << 4, /* type code */ 4, /* length */ 4, /* value */ 0, 0, 0, 0
+            ]
+        )
     }
 }
