@@ -3,11 +3,22 @@ mod bgp;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use bgp::{BGP_HEADER_SIZE, BGP_OPEN_SIZE, BGP_MAX_MSG_SIZE, BGPMessage, message_length};
+use bgp::{BGP_MAX_MSG_SIZE, BGPMessage, message_length};
 use bgp::open::BGPOpen;
 use bgp::keepalive::BGPKeepalive;
+use bgp::errors::BgpError;
 
-async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> () {
+const LOG_MESSAGES: bool = true;
+
+async fn send_message(message: BGPMessage, socket: &mut TcpStream) -> Result<(), BgpError>{
+    if LOG_MESSAGES { println!("S: {:#?}", &message); }
+    let buf: Vec<u8> = message.into();
+    socket.write_all(&buf[..]).await?;
+    Ok(())
+}
+
+async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> Result<(), BgpError> {
+    if LOG_MESSAGES { println!("R: {:#?}", &message); }
     match message {
         BGPMessage::Open(_) => {
             let open = BGPOpen {
@@ -18,24 +29,15 @@ async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> () {
                 opt_params_len: 0,
                 opt_params: (),
             };
-            //println!("S: {:?}", &open);
-            let buf: [u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE] = open.into();
-            if let Err(e) = socket.write_all(&buf[..]).await {
-                eprintln!("failed to write to socket, err = {:?}", e);
-                return;
-            }
+            send_message(BGPMessage::Open(open), socket).await?;
         },
         BGPMessage::Keepalive(_) => {
             let keepalive = BGPKeepalive {};
-            //println!("S: {:?}", &keepalive);
-            let buf: [u8; BGP_HEADER_SIZE] = keepalive.into();
-            if let Err(e) = socket.write_all(&buf[..]).await {
-                eprintln!("failed to write to socket, err = {:?}", e);
-                return;
-            }
+            send_message(BGPMessage::Keepalive(keepalive), socket).await?;
         },
         _ => {}
     }
+    Ok(())
 }
 
 #[tokio::main]
@@ -59,12 +61,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let bgp_message_buf = &buf[i..n];
                     let bgp_message_length = message_length(&bgp_message_buf);
                     let bgp_message: BGPMessage = bgp_message_buf.into();
-                    handle_message(&bgp_message, &mut socket).await;
+                    handle_message(&bgp_message, &mut socket).await.expect("Failed to handle message");
                     i += bgp_message_length;
                     bytes_left -= bgp_message_length;
                 }
-
-                //println!("R: {:#?}", &bgp_message);
             }
         });
     }

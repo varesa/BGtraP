@@ -1,4 +1,4 @@
-use byteorder::{ByteOrder, NetworkEndian};
+use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use crate::bgp::{BGP_HEADER_SIZE, BGP_OPEN_SIZE, BGP_TYPE_OPEN, make_bgp_header};
 
 #[derive(Debug)]
@@ -24,19 +24,18 @@ impl From<&[u8]> for BGPOpen {
     }
 }
 
-impl Into<[u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE]> for BGPOpen {
-    fn into(self) -> [u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE] {
-        let mut buf = [0 as u8; BGP_HEADER_SIZE + BGP_OPEN_SIZE];
-        const BHS: usize = BGP_HEADER_SIZE;
+impl Into<Vec<u8>> for BGPOpen {
+    fn into(self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(BGP_HEADER_SIZE + BGP_OPEN_SIZE);
 
         let header = make_bgp_header(BGP_OPEN_SIZE as u16, BGP_TYPE_OPEN);
-
-        buf[0 .. BHS].copy_from_slice(&header[..]);
-        buf[BHS + 0] = self.version;
-        NetworkEndian::write_u16(&mut buf[BHS + 1 .. BHS + 3], self.sender_as);
-        NetworkEndian::write_u16(&mut buf[BHS + 3 .. BHS + 5], self.hold_time);
-        NetworkEndian::write_u32(&mut buf[BHS + 5 .. BHS + 9], self.bgp_id);
-        buf[BHS + 9] = self.opt_params_len;
+        buf.extend_from_slice(&header[..]);
+        buf.push(self.version);
+        buf.write_u16::<NetworkEndian>(self.sender_as).unwrap();
+        buf.write_u16::<NetworkEndian>(self.hold_time).unwrap();
+        buf.write_u32::<NetworkEndian>(self.bgp_id).unwrap();
+        buf.push(self.opt_params_len);
+        if self.opt_params_len > 0 { unimplemented!(); }
 
         return buf
     }

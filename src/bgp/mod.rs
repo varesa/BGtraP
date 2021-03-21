@@ -2,6 +2,7 @@ pub mod update;
 pub mod open;
 pub mod keepalive;
 pub mod notification;
+pub mod errors;
 
 use byteorder::{ByteOrder, NetworkEndian};
 
@@ -53,3 +54,15 @@ impl From<&[u8]> for BGPMessage {
         }
     }
 }
+
+impl Into<Vec<u8>> for BGPMessage {
+    fn into(self) -> Vec<u8> {
+        match self {
+            BGPMessage::Open(open) => open.into(),
+            BGPMessage::Keepalive(keepalive) => keepalive.into(),
+            BGPMessage::Update(_update) => unimplemented!(),
+            BGPMessage::Notification(_notification) => unimplemented!(),
+        }
+    }
+}
+

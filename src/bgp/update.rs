@@ -1,4 +1,4 @@
-use byteorder::{ByteOrder, NetworkEndian};
+use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use std::fmt;
 
 pub struct Prefix {
@@ -100,7 +100,7 @@ impl From<&[u8]> for BGPUpdate {
         let prefixes_length = buf.len() - prefixes_start;
         let prefixes = extract_prefixes(&buf[prefixes_start .. prefixes_start + prefixes_length]);
 
-        println!("{:?}", &prefixes);
+        //println!("{:?}", &prefixes);
 
         BGPUpdate {
             withdrawn_routes_len: withdrawn_length,
