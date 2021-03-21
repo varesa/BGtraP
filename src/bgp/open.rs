@@ -29,7 +29,7 @@ impl Into<Vec<u8>> for BGPOpen {
         let mut buf = Vec::with_capacity(BGP_HEADER_SIZE + BGP_OPEN_SIZE);
 
         let header = make_bgp_header(BGP_OPEN_SIZE as u16, BGP_TYPE_OPEN);
-        buf.extend_from_slice(&header[..]);
+        buf.extend_from_slice(&header);
         buf.push(self.version);
         buf.write_u16::<NetworkEndian>(self.sender_as).unwrap();
         buf.write_u16::<NetworkEndian>(self.hold_time).unwrap();

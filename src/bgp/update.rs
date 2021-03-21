@@ -1,97 +1,14 @@
-use byteorder::{ByteOrder, NetworkEndian};
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
-use std::fmt::Formatter;
+use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
+use super::{BGP_TYPE_UPDATE, make_bgp_header};
 use super::utils::prefix::{Prefix, extract_prefixes};
+use super::utils::path_attribute::{PathAttribute, extract_path_attributes};
 
 #[derive(Debug)]
 pub struct BGPUpdate {
-    withdrawn_routes_len: u16,
     withdrawn_routes: Vec<Prefix>,
-    total_path_attribute_len: u16,
     path_attributes: Vec<PathAttribute>,
     network_layer_reachability_information: Vec<Prefix>,
-}
-
-pub struct PathAttribute {
-    flags: Vec<AttributeFlag>,
-    type_code: AttributeType,
-    value: Vec<u8>,
-}
-
-
-
-#[derive(FromPrimitive, ToPrimitive, Debug)]
-enum AttributeFlag {
-    Optional       = 1 << 7,
-    Transitional   = 1 << 6,
-    Partial        = 1 << 5,
-    ExtendedLength = 1 << 4,
-}
-
-#[derive(Debug)]
-enum AttributeType {
-    Origin, ASPath, NextHop, MultiExitDisc, LocalPref, AtomicAggregate, Aggregator, Unknown(u8)
-}
-
-impl From<u8> for AttributeType {
-    fn from(code: u8) -> Self {
-        match code {
-            1 => AttributeType::Origin,
-            2 => AttributeType::ASPath,
-            3 => AttributeType::NextHop,
-            4 => AttributeType::MultiExitDisc,
-            5 => AttributeType::LocalPref,
-            6 => AttributeType::AtomicAggregate,
-            7 => AttributeType::Aggregator,
-            n => AttributeType::Unknown(n)
-        }
-    }
-}
-
-fn extract_path_attributes(data: &[u8]) -> Vec<PathAttribute> {
-    let mut path_attributes = Vec::new();
-
-    let mut bytes_left = data.len();
-    let mut i = 0;
-    while bytes_left > 0 {
-        let flags_bitfield = data[i];
-        let mut flags = Vec::new();
-        for offset in 4 .. 8 {
-            let flag_bit = 1 << offset;
-            if flags_bitfield & flag_bit != 0 {
-                let flag: Option<AttributeFlag> = FromPrimitive::from_u8(flag_bit);
-                if let Some(flag) = flag {
-                    flags.push(flag);
-                } else {
-                    panic!(format!("Bad attribute flags: {}", flags_bitfield));
-                }
-            }
-        }
-        let type_code = data[i+1];
-
-        let attribute_length;
-        let attribute_header_length;
-        if (flags_bitfield & AttributeFlag::ExtendedLength as u8) != 0 { // Extended length
-            attribute_length = NetworkEndian::read_u16(&data[i+2..i+4]) as usize;
-            attribute_header_length = 4;
-        } else { // Normal length
-            attribute_length = data[i+2] as usize;
-            attribute_header_length = 3;
-        }
-        let attribute_value = data[i + attribute_header_length .. i + attribute_header_length + attribute_length].to_vec();
-        path_attributes.push(
-            PathAttribute {
-                flags,
-                type_code: type_code.into(),
-                value: attribute_value,
-            }
-        );
-        i += attribute_header_length + attribute_length;
-        bytes_left -= attribute_header_length + attribute_length;
-    }
-    return path_attributes;
 }
 
 const U16_LENGTH_FIELD: usize = 2;
@@ -113,27 +30,26 @@ impl From<&[u8]> for BGPUpdate {
         let prefixes = extract_prefixes(&buf[prefixes_start .. prefixes_start + prefixes_length]);
 
         BGPUpdate {
-            withdrawn_routes_len: withdrawn_length,
-            withdrawn_routes: withdrawn_routes,
-            total_path_attribute_len: path_attribute_length,
-            path_attributes: path_attributes,
+            withdrawn_routes,
+            path_attributes,
             network_layer_reachability_information: prefixes,
         }
     }
 }
 
-impl std::fmt::Debug for PathAttribute {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("[PathAttribute] {:?}: {:?} (Flags: {:?})", self.type_code, self.value, self.flags))
-    }
-}
-
-/*impl Into<Vec<u8>> for BGPUpdate {
+/*
+impl Into<Vec<u8>> for BGPUpdate {
     fn into(self) -> Vec<u8> {
         let mut buf = Vec::new();
 
-        let header = make_bgp_header(BGP_OPEN_SIZE as u16, BGP_TYPE_OPEN);
-        buf.extend_from_slice(&header[..]);
+        // Size is a placeholder, fill later
+        let header = make_bgp_header(0 as u16, BGP_TYPE_UPDATE);
+
+        let mut withdrawn_routes = compile_prefixes(self.withdrawn_routes);
+        buf.write_u16::<NetworkEndian>(withdrawn_routes.len() as u16).unwrap();
+        buf.append(&mut withdrawn_routes);
+
+        buf.extend_from_slice(&header);
         buf.push(self.version);
         buf.write_u16::<NetworkEndian>(self.sender_as).unwrap();
         buf.write_u16::<NetworkEndian>(self.hold_time).unwrap();
