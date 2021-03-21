@@ -11,11 +11,12 @@ pub enum AttributeFlag {
     ExtendedLength = 1 << 4,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AttributeType {
     Origin, ASPath, NextHop, MultiExitDisc, LocalPref, AtomicAggregate, Aggregator, Unknown(u8)
 }
 
+#[derive(PartialEq)]
 pub struct PathAttribute {
     flags: Vec<AttributeFlag>,
     type_code: AttributeType,
@@ -131,5 +132,29 @@ mod tests {
             AttributeFlag::Transitive,
             AttributeFlag::Optional,
         ]));
+    }
+
+    #[test]
+    fn test_extract_path_attributes() {
+        assert_eq!(
+            extract_path_attributes(&[/* flags */ 0, /* type code */ 0, /* length */ 0]),
+            vec![PathAttribute { type_code: AttributeType::Unknown(0), value: vec![], flags: vec![] }]
+        );
+
+        assert_eq!(
+            extract_path_attributes(&[/* flags */ 0b0100 << 4, /* type code */ 1, /* length */ 1, /* value */ 2]),
+            vec![PathAttribute { type_code: AttributeType::Origin, value: vec![2], flags: vec![AttributeFlag::Transitive] }]
+        );
+
+        assert_eq!(
+            extract_path_attributes(&[
+                /* flags */ 0b0101 << 4, /* type code */ 2, /* length */ 0, 0,
+                /* flags */ 0b1000 << 4, /* type code */ 4, /* length */ 4, /* value */ 0, 0, 0, 0
+            ]),
+            vec![
+                PathAttribute { type_code: AttributeType::ASPath, value: vec![], flags: vec![AttributeFlag::ExtendedLength, AttributeFlag::Transitive] },
+                PathAttribute { type_code: AttributeType::MultiExitDisc, value: vec![0, 0, 0, 0], flags: vec![AttributeFlag::Optional]},
+            ]
+        );
     }
 }
