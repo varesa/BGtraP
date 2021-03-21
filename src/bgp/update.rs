@@ -1,19 +1,9 @@
 use byteorder::{ByteOrder, NetworkEndian};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use std::fmt;
 use std::fmt::Formatter;
 
-pub struct Prefix {
-    length: u8,
-    prefix: [u8; 4],
-}
-
-impl fmt::Debug for Prefix {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_fmt(format_args!("{}.{}.{}.{}/{}", self.prefix[0], self.prefix[1], self.prefix[2], self.prefix[3], self.length))
-    }
-}
+use super::utils::prefix::{Prefix, extract_prefixes};
 
 #[derive(Debug)]
 pub struct BGPUpdate {
@@ -30,27 +20,7 @@ pub struct PathAttribute {
     value: Vec<u8>,
 }
 
-fn extract_prefixes(data: &[u8]) -> Vec<Prefix> {
-    let mut routes: Vec<Prefix> = Vec::new();
 
-    let mut bytes_left = data.len();
-    let mut i = 0; // Start after the "withdrawn length" field
-
-    while bytes_left > 0 {
-        let prefix_length = data[i];
-        let prefix_octets = (prefix_length as f32 / 8f32).ceil() as usize;
-        let mut prefix = [0 as u8; 4];
-        prefix[0..prefix_octets].copy_from_slice(&data[i+1 .. i+1+prefix_octets]);
-        routes.push(Prefix {
-            prefix: prefix,
-            length: prefix_length,
-        });
-        i += 1 + prefix_octets;
-        bytes_left -= 1 + prefix_octets as usize;
-    }
-
-    return routes;
-}
 
 #[derive(FromPrimitive, ToPrimitive, Debug)]
 enum AttributeFlag {
@@ -157,3 +127,20 @@ impl std::fmt::Debug for PathAttribute {
         f.write_fmt(format_args!("[PathAttribute] {:?}: {:?} (Flags: {:?})", self.type_code, self.value, self.flags))
     }
 }
+
+/*impl Into<Vec<u8>> for BGPUpdate {
+    fn into(self) -> Vec<u8> {
+        let mut buf = Vec::new();
+
+        let header = make_bgp_header(BGP_OPEN_SIZE as u16, BGP_TYPE_OPEN);
+        buf.extend_from_slice(&header[..]);
+        buf.push(self.version);
+        buf.write_u16::<NetworkEndian>(self.sender_as).unwrap();
+        buf.write_u16::<NetworkEndian>(self.hold_time).unwrap();
+        buf.write_u32::<NetworkEndian>(self.bgp_id).unwrap();
+        buf.push(self.opt_params_len);
+        if self.opt_params_len > 0 { unimplemented!(); }
+
+        return buf
+    }
+}*/

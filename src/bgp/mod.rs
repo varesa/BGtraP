@@ -3,6 +3,7 @@ pub mod open;
 pub mod keepalive;
 pub mod notification;
 pub mod errors;
+mod utils;
 
 use byteorder::{ByteOrder, NetworkEndian};
 
