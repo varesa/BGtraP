@@ -7,9 +7,9 @@ use crate::bgp::utils::path_attribute::compile_path_attributes;
 
 #[derive(Debug)]
 pub struct BGPUpdate {
-    withdrawn_routes: Vec<Prefix>,
-    path_attributes: Vec<PathAttribute>,
-    network_layer_reachability_information: Vec<Prefix>,
+    pub withdrawn_routes: Vec<Prefix>,
+    pub path_attributes: Vec<PathAttribute>,
+    pub network_layer_reachability_information: Vec<Prefix>,
 }
 
 const U16_LENGTH_FIELD: usize = 2;
@@ -45,6 +45,7 @@ impl Into<Vec<u8>> for BGPUpdate {
 
         // Size is a placeholder, fill later
         let header = make_bgp_header(0 as u16, BGP_TYPE_UPDATE);
+        buf.extend_from_slice(&header);
 
         let mut withdrawn_routes = compile_prefixes(self.withdrawn_routes);
         buf.write_u16::<NetworkEndian>(withdrawn_routes.len() as u16).unwrap();
@@ -58,7 +59,8 @@ impl Into<Vec<u8>> for BGPUpdate {
         buf.append(&mut prefixes);
 
         // Fix size in header
-        NetworkEndian::write_u16(&mut buf[16 .. 18],buf.len() as u16);
+        let message_length = buf.len() as u16;
+        NetworkEndian::write_u16(&mut buf[16 .. 18],message_length);
 
         return buf
     }

@@ -2,8 +2,8 @@ use std::fmt;
 
 #[derive(PartialEq)]
 pub struct Prefix {
-    length: u8,
-    prefix: [u8; 4],
+    pub length: u8,
+    pub prefix: [u8; 4],
 }
 
 impl fmt::Debug for Prefix {

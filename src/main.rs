@@ -9,7 +9,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use bgp::{BGP_MAX_MSG_SIZE, BGPMessage, message_length};
 use bgp::open::BGPOpen;
 use bgp::keepalive::BGPKeepalive;
+use bgp::utils::prefix::Prefix;
 use bgp::errors::BgpError;
+use crate::bgp::update::BGPUpdate;
+use crate::bgp::utils::path_attribute::{PathAttribute, AttributeType, AttributeFlag};
 
 const LOG_MESSAGES: bool = true;
 
@@ -37,6 +40,30 @@ async fn send_message(message: BGPMessage, socket: &mut TcpStream) -> Result<(),
     Ok(())
 }
 
+static mut ADV_SENT: bool = false;
+
+async fn demo(socket: &mut TcpStream) -> Result<(), BgpError> {
+    unsafe {
+        if ADV_SENT {
+            return Ok(())
+        }
+        ADV_SENT = true;
+    }
+
+    let advertisement = BGPUpdate {
+        withdrawn_routes: vec![],
+        network_layer_reachability_information: vec![Prefix { length: 32, prefix: [10, 10, 100, 200]}],
+        path_attributes: vec![
+            PathAttribute { type_code: AttributeType::Origin, value: vec![2], flags: vec![AttributeFlag::Transitive]},
+            PathAttribute { type_code: AttributeType::ASPath, value: vec![], flags: vec![AttributeFlag::ExtendedLength, AttributeFlag::Transitive]},
+            PathAttribute { type_code: AttributeType::NextHop, value: vec![192, 168, 10, 5], flags: vec![AttributeFlag::Transitive]},
+            PathAttribute { type_code: AttributeType::LocalPref, value: vec![0, 0, 0, 100], flags: vec![AttributeFlag::Transitive]}
+        ]
+    };
+    send_message(BGPMessage::Update(advertisement), socket).await?;
+    Ok(())
+}
+
 async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> Result<(), BgpError> {
     log_message("R", &message);
     match message {
@@ -54,6 +81,7 @@ async fn handle_message(message: &BGPMessage, socket: &mut TcpStream) -> Result<
         BGPMessage::Keepalive(_) => {
             let keepalive = BGPKeepalive {};
             send_message(BGPMessage::Keepalive(keepalive), socket).await?;
+            demo(socket).await?;
         },
         _ => {}
     }

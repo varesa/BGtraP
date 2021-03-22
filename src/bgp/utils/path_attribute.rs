@@ -57,9 +57,9 @@ extended_enum!(AttributeType, [
 
 #[derive(PartialEq)]
 pub struct PathAttribute {
-    flags: Vec<AttributeFlag>,
-    type_code: AttributeType,
-    value: Vec<u8>,
+    pub flags: Vec<AttributeFlag>,
+    pub type_code: AttributeType,
+    pub value: Vec<u8>,
 }
 
 impl std::fmt::Debug for PathAttribute {
@@ -130,7 +130,7 @@ pub(crate) fn compile_path_attributes(attributes: Vec<PathAttribute>) -> Vec<u8>
         buffer.push(compile_attribute_flags(&attribute.flags));
         buffer.push(attribute.type_code.into());
         if attribute.flags.contains(&AttributeFlag::ExtendedLength) {
-            buffer.write_u16::<NetworkEndian>(attribute.value.len() as u16);
+            buffer.write_u16::<NetworkEndian>(attribute.value.len() as u16).unwrap();
         } else {
             buffer.push(attribute.value.len() as u8);
         }
