@@ -1,8 +1,9 @@
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
 use super::{BGP_TYPE_UPDATE, make_bgp_header};
-use super::utils::prefix::{Prefix, extract_prefixes};
+use super::utils::prefix::{Prefix, compile_prefixes, extract_prefixes};
 use super::utils::path_attribute::{PathAttribute, extract_path_attributes};
+use crate::bgp::utils::path_attribute::compile_path_attributes;
 
 #[derive(Debug)]
 pub struct BGPUpdate {
@@ -37,7 +38,7 @@ impl From<&[u8]> for BGPUpdate {
     }
 }
 
-/*
+
 impl Into<Vec<u8>> for BGPUpdate {
     fn into(self) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -49,14 +50,16 @@ impl Into<Vec<u8>> for BGPUpdate {
         buf.write_u16::<NetworkEndian>(withdrawn_routes.len() as u16).unwrap();
         buf.append(&mut withdrawn_routes);
 
-        buf.extend_from_slice(&header);
-        buf.push(self.version);
-        buf.write_u16::<NetworkEndian>(self.sender_as).unwrap();
-        buf.write_u16::<NetworkEndian>(self.hold_time).unwrap();
-        buf.write_u32::<NetworkEndian>(self.bgp_id).unwrap();
-        buf.push(self.opt_params_len);
-        if self.opt_params_len > 0 { unimplemented!(); }
+        let mut path_attributes = compile_path_attributes(self.path_attributes);
+        buf.write_u16::<NetworkEndian>(path_attributes.len() as u16).unwrap();
+        buf.append(&mut path_attributes);
+
+        let mut prefixes = compile_prefixes(self.network_layer_reachability_information);
+        buf.append(&mut prefixes);
+
+        // Fix size in header
+        NetworkEndian::write_u16(&mut buf[16 .. 18],buf.len() as u16);
 
         return buf
     }
-}*/
+}
